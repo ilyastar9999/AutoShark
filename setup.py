@@ -14,6 +14,7 @@ setup(
     entry_points={
         'console_scripts': [
             'autoshark=main:main',
+            'test=test:aaa'
         ],
     },
     

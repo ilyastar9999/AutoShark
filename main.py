@@ -83,7 +83,12 @@ def display_communication(filename, extract, protocol = ''):
             out = os.popen(f"tshark -r {filename} -z conv,{protocol}").read()
         else:
             print("Неверный протокол")
-    out = out.split("================================================================================")
+    out = out.split("=")
+    new_out = [] 
+    for i in out:
+        if i != '' and i != '\n':
+            new_out.append(i)
+    out = new_out[:]
     if extract:
         sys.stdout = open(extract, 'w') 
     print(out[1])
@@ -160,7 +165,12 @@ def endpointsfunc(filename, extract, protocol=''):
             out = os.popen(f"tshark -r {filename} -z endpoints,{protocol}").read()
         else:
             print("Неверный протокол")
-    out = out.split("================================================================================")
+    out = out.split("=")
+    new_out = [] 
+    for i in out:
+        if i != '' and i != '\n':
+            new_out.append(i)
+    out = new_out[:]
     if extract:
         sys.stdout = open(extract, 'w') 
     print(out[1])
@@ -168,9 +178,106 @@ def endpointsfunc(filename, extract, protocol=''):
         sys.stdout.close()
         sys.stdout = sys.__stdout__
 
+def streamsfunc(filename, extract, streams = ''):
+    streamsl = []
+    if streams == '':
+        while True:
+            streams = input("""Введите протокол, тип вывода и номер начального потока через запятую без пробелов:
+Протоколы:
+dccp, http, http2, quic, sip, tcp, tls, udp, websocket
+
+Типы вывода:
+hex, ascii, ebcdic, raw
+
+> """)
+            streamsl = streams.split(',')
+            if len(streamsl) == 3:
+                if streamsl[0] in ['dccp', 'http', 'http2', 'quic', 'sip', 'tcp', 'tls', 'udp', 'websocket']:
+                    if streamsl[1] in ['hex', 'ascii', 'ebcdic', 'raw']:
+                        if streamsl[2].isdigit():
+                            break
+                        else:
+                            print('Номер начального пакета не является числом')
+                    else:
+                        print('Неправильный тип вывода')
+                else:
+                    print('Неправильный протокол')
+            else:
+                print('Неверное количество элементов(3).')
+    
+    else:
+        if len(streamsl) == 3:
+            if streamsl[0] in ['dccp', 'http', 'http2', 'quic', 'sip', 'tcp', 'tls', 'udp', 'websocket']:
+                if streamsl[1] in ['hex', 'ascii', 'ebcdic', 'raw']:
+                    if streamsl[2].isdigit():
+                        pass
+                    else:
+                        print('Номер начального пакета не является числом')
+                else:
+                    print('Неправильный тип вывода')
+            else:
+                print('Неправильный протокол')
+        else:
+            print('Неверное количество элементов(3).')
+    while True:
+        out = os.popen(f'tshark -r {filename} -z "follow,{",".join(streamsl)}"').read()
+        out = out.split("=")
+        new_out = [] 
+        for i in out:
+            if i != '' and i != '\n':
+                new_out.append(i)
+        out = new_out[:]
+        if out[-1].split('\n')[-3:] == ['Node 0: :0', 'Node 1: :0', '']:
+            print('Нечего не найдено')
+        else:
+            print(out[-1])
+        print(f'Поток номер {streamsl[2]}')
+        choose = ''
+        if extract:
+            choose = input("""Выберете действие:
+1) Следуйщий поток
+2) Предидущий поток
+3) Перейти на другой поток
+4) Сохранить в файл
+q) Выйти
+""")[0]
+        else:                    
+            choose = input("""Выберете действие:
+1) Следуйщий поток
+2) Предидущий поток
+3) Перейти на другой поток
+q) Выйти
+""")[0]
+        if choose == '1':
+            streamsl[2] = str(int(streamsl[2])+1)
+        elif choose == '2':
+            if streamsl[2] == '0':
+                print('Предидущего пакета несуществует')
+            streamsl[2] = str(int(streamsl[2])-1)
+        elif choose == '3':
+            stream = input("Введите номер пакета: ")
+            if not stream.isdigit():
+                print('Неправильный номер пакета')
+                continue
+            streamsl[2] = stream
+        elif choose == '4' and extract:
+            sys.stdout = open(extract, 'w') 
+            print(out[1])
+            sys.stdout.close()
+            sys.stdout = sys.__stdout__
+        elif choose.lower() == 'q':
+            break
+
+
+
 def autoanalyzefunc(filename, extract, path):
     yara_rules = yara.compile(path)
+    if extract:
+        sys.stdout = open(extract, 'w') 
     print("Найдены следуйшие правила"*yara_rules.match(filename))
+    if extract:
+        sys.stdout.close()
+        sys.stdout = sys.__stdout__
 
 @click.command(context_settings=dict(help_option_names=['-h', '--help']))
 @click.option('-l', '--list', is_flag=True, help='Print all packets')
@@ -184,8 +291,9 @@ def autoanalyzefunc(filename, extract, path):
 @click.option('-f', '--files', is_flag=True, help='Extract all files from dump')
 @click.option('--filter', type=str, help='Filter packets by tshark filter. if contains spaces use quotes')
 @click.option('--endpoints', type=str, help='Show endpoints of packets by writed protocol')
+@click.option('--streams', type=int)
 @click.argument('file', type=click.Path(exists=True), metavar='Файл для анализа', required=False)
-def main(file, list, short_list, extract, len_graph, conversations_graph, conversations, autoanalyze, packet, files, filter, endpoints):
+def main(file, list, short_list, extract, len_graph, conversations_graph, conversations, autoanalyze, packet, files, filter, endpoints, streams):
     if extract:
         if '/' in extract or '\\' in extract:
             if check_path(extract):
@@ -207,28 +315,30 @@ def main(file, list, short_list, extract, len_graph, conversations_graph, conver
         print("Ошибка при чтении файла. Убедитесь что файл является дампом сетевого трафика")
         return
     print(f"Считано {len(cap)} пакетов")
-    if not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter:
+    if not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter and not streams:
         cli(extract, cap, file)
-    elif list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter:
+    elif list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter and not streams:
         list_packets(cap, extract)
-    elif short_list and not list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter:
+    elif short_list and not list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter and not streams:
         list_short_packets(cap, extract)
-    elif len_graph and not list and not short_list and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter:
+    elif len_graph and not list and not short_list and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter and not streams:
         display_length_graph(cap, extract)
-    elif conversations_graph and not list and not short_list and not len_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter:
+    elif conversations_graph and not list and not short_list and not len_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter and not streams:
         display_communication_map(cap, extract)
-    elif conversations and not list and not short_list and not len_graph and not conversations_graph and not autoanalyze and not files and not packet and not endpoints and not filter:
+    elif conversations and not list and not short_list and not len_graph and not conversations_graph and not autoanalyze and not files and not packet and not endpoints and not filter and not streams:
         display_communication(file, extract, conversations)
-    elif autoanalyze and not list and not short_list and not len_graph and not conversations_graph and not conversations and not files and not packet and not endpoints and not filter:
+    elif autoanalyze and not list and not short_list and not len_graph and not conversations_graph and not conversations and not files and not packet and not endpoints and not filter and not streams:
         autoanalyzefunc(file, extract, autoanalyze)
-    elif files and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not packet and not endpoints and not filter:
+    elif files and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not packet and not endpoints and not filter and not streams:
         extract_files(file)
-    elif packet and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not endpoints and not filter:
+    elif packet and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not endpoints and not filter and not streams:
         print_packet(packet, cap, extract)
-    elif endpoints and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not filter:
+    elif endpoints and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not filter and not streams:
         endpointsfunc(file, extract)
-    elif filter and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints:
+    elif filter and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not streams:
         filterfunc(filter, extract, file)
+    elif streams and not list and not short_list and not len_graph and not conversations_graph and not conversations and not autoanalyze and not files and not packet and not endpoints and not filter:
+        streamsfunc(extract, file, streams)
     else:
         print('Выберите 1 задачу на запрос.')
 
@@ -246,6 +356,7 @@ def cli(extract, cap, file):
 7) Извлечь все файлы из дампа
 8) Применить фильтр для пакетов(для продвинутых)
 9) Вывести конечные адреса программы
+10) Вывести потоки пакетов
 a) Автоматический анализ пакетов
 q) Выход
 > """)[:2]    
@@ -254,7 +365,10 @@ q) Выход
         elif choose == '2':
             list_short_packets(cap, extract)
         elif choose == '3':
-            packet = int(input("Введите номер пакета: "))
+            packet = input("Введите номер пакета: ")
+            if not packet.isdigit():
+                print('Неправильный номер пакета')
+                continue
             print_packet(packet, cap, extract)
         elif choose == '4':
             display_length_graph(cap, extract)
@@ -269,6 +383,8 @@ q) Выход
             filterfunc(filter, extract, file)
         elif choose == '9':
             endpointsfunc(file, extract)
+        elif choose == '10':
+            streamsfunc(file, extract)
         elif choose.lower() == 'a' or choose.lower() == 'а':
             option = input("Введите путь к файлу правил yara: ")
             autoanalyzefunc(file, extract, option)
